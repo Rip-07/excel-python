@@ -45,39 +45,39 @@ def process_analytics(dataframe):
 prihod, prihod_columns = process_analytics(prihod)
 rashod, rashod_columns = process_analytics(rashod)
 
-# Расположение колонок для "Приход" и "Расход"
+# Добавление колонок "Год" и "Месяц"
+prihod["Год"] = pd.to_datetime(prihod["Дата"], dayfirst=True, errors="coerce").dt.year
+prihod["Месяц"] = pd.to_datetime(prihod["Дата"], dayfirst=True, errors="coerce").dt.month_name()
+
+rashod["Год"] = pd.to_datetime(rashod["Дата"], dayfirst=True, errors="coerce").dt.year
+rashod["Месяц"] = pd.to_datetime(rashod["Дата"], dayfirst=True, errors="coerce").dt.month_name()
+
+# Расположение колонок для "Приход"
 prihod = prihod[
-    ["Дата"] +
+    ["Год", "Месяц", "Дата"] +
     [col for col in prihod_columns if "Аналитика" in col and "Дебит" not in col and "Кредит" not in col] +
     [col for col in prihod_columns if "Дебит" in col] +
     [col for col in prihod_columns if "Кредит" in col] +
     ["Счет дебита", "Сумма дебита", "Счет кредита"]
 ]
 
+# Расположение колонок для "Расход"
 rashod = rashod[
-    ["Дата"] +
+    ["Год", "Месяц", "Дата"] +
     [col for col in rashod_columns if "Аналитика" in col and "Дебит" not in col and "Кредит" not in col] +
     [col for col in rashod_columns if "Дебит" in col] +
     [col for col in rashod_columns if "Кредит" in col] +
     ["Счет дебита", "Счет кредита", "Сумма кредита"]
 ]
 
-# Преобразование даты и добавление колонки с названием месяца
-prihod["Месяц"] = pd.to_datetime(prihod["Дата"], dayfirst=True, errors="coerce").dt.month_name()
-
-# Проверка на строки, которые не удалось преобразовать
-if prihod["Месяц"].isna().any():
-    print("Не удалось преобразовать следующие даты:")
-    print(prihod[prihod["Месяц"].isna()])
-
 # Создание классификации доходов
 classification = (
     prihod.groupby("Аналитика (Дебит) 3", as_index=False)
     .agg({"Сумма дебита": "sum"})
-    .rename(columns={"Аналитика (Дебит) 3": "Статья доходов", "Сумма дебита": "Итоговая сумма"})
+    .rename(columns={"Аналитика (Дебит) 3": "Статья доходов", "Сумма дебита": "Итого доходов"})
 )
 
-# Добавление месячных колонок
+# Добавление месячных колонок для доходов
 month_columns = prihod.pivot_table(
     index="Аналитика (Дебит) 3",
     columns="Месяц",
@@ -88,55 +88,85 @@ month_columns = prihod.pivot_table(
 
 classification = classification.merge(month_columns, how="left", left_on="Статья доходов", right_on="Аналитика (Дебит) 3").drop(columns=["Аналитика (Дебит) 3"])
 
-# Обработка контрагентов для "Реализация работ и услуг"
-realization = prihod[prihod["Аналитика (Дебит) 3"] == "Реализация работ и услуг"]
-realization_details = (
-    realization.groupby(["Аналитика (Кредит) 2", "Месяц"], as_index=False)
-    .agg({"Сумма дебита": "sum"})
-    .pivot_table(index="Аналитика (Кредит) 2", columns="Месяц", values="Сумма дебита", fill_value=0)
-    .reset_index()
+# Сортировка доходов от большего к меньшему
+classification = classification.sort_values(by="Итого доходов", ascending=False)
+
+# Упорядочивание месяцев
+month_order = [
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December"
+]
+classification_columns = ["Статья доходов", "Итого доходов"] + [month for month in month_order if month in classification.columns]
+classification = classification[classification_columns]
+
+# Создание классификации расходов
+classification_rashod = (
+    rashod.groupby("Аналитика (Кредит) 3", as_index=False)
+    .agg({"Сумма кредита": "sum"})
+    .rename(columns={"Аналитика (Кредит) 3": "Статья расходов", "Сумма кредита": "Итого расходов"})
 )
 
-# Добавляем итоговую сумму по контрагентам
-realization_details["Итоговая сумма"] = realization_details.sum(axis=1, numeric_only=True)
+# Добавление месячных колонок для расходов
+rashod_month_columns = rashod.pivot_table(
+    index="Аналитика (Кредит) 3",
+    columns="Месяц",
+    values="Сумма кредита",
+    aggfunc="sum",
+    fill_value=0
+).reset_index()
 
-# Итоговая строка для "Реализация работ и услуг"
-realization_total = pd.DataFrame({
-    "Статья доходов": ["Реализация работ и услуг (итого)"],
-    "Итоговая сумма": [realization["Сумма дебита"].sum()],
-    "November": [realization[realization["Месяц"] == "November"]["Сумма дебита"].sum()]
-})
+classification_rashod = classification_rashod.merge(
+    rashod_month_columns, how="left", left_on="Статья расходов", right_on="Аналитика (Кредит) 3"
+).drop(columns=["Аналитика (Кредит) 3"])
 
-# Объединение данных для "Реализация работ и услуг"
-realization_rows = pd.concat([
-    realization_total,
-    realization_details.rename(columns={"Аналитика (Кредит) 2": "Статья доходов"})
-])
+# Сортировка расходов от большего к меньшему
+classification_rashod = classification_rashod.sort_values(by="Итого расходов", ascending=False)
 
-classification = pd.concat([
-    realization_rows,
-    classification[classification["Статья доходов"] != "Реализация работ и услуг"]
-], ignore_index=True)
+# Упорядочивание месяцев для расходов
+classification_rashod_columns = ["Статья расходов", "Итого расходов"] + [
+    month for month in month_order if month in classification_rashod.columns
+]
+classification_rashod = classification_rashod[classification_rashod_columns]
 
-# Сохранение в Excel
+# Проверки по доходам
+check_total_prihod = prihod["Сумма дебита"].sum()
+check_total_classification = classification["Итого доходов"].sum()
+difference_total = check_total_prihod - check_total_classification
+check_result = "True" if abs(difference_total) < 1e-5 else "False"
+
+# Проверки по расходам
+check_total_rashod = rashod["Сумма кредита"].sum()
+check_total_classification_rashod = classification_rashod["Итого расходов"].sum()
+difference_rashod_total = check_total_rashod - check_total_classification_rashod
+check_rashod_result = "True" if abs(difference_rashod_total) < 1e-5 else "False"
+
+# Сохранение в Excel с проверками, форматированием чисел и названиями месяцев
 output_file = "результат.xlsx"
 with pd.ExcelWriter(output_file, engine="xlsxwriter") as writer:
     prihod.to_excel(writer, index=False, sheet_name="Приход")
     rashod.to_excel(writer, index=False, sheet_name="Расход")
+    classification.to_excel(writer, index=False, sheet_name="Классификация доходов", startrow=1)
+    classification_rashod.to_excel(writer, index=False, sheet_name="Классификация расходов", startrow=1)
 
     workbook = writer.book
-    classification.to_excel(writer, index=False, sheet_name="Классификация доходов")
+    number_format = workbook.add_format({"num_format": "#,##0", "align": "right"})
+    merge_format = workbook.add_format({"align": "center", "bold": True, "border": 1})
+
+    # Добавление проверок по месяцам для "Классификация доходов"
     worksheet = writer.sheets["Классификация доходов"]
+    worksheet.merge_range(0, 2, 0, len(classification_columns) - 1, "2024", merge_format)
 
-    # Форматирование шрифта
-    bold_format = workbook.add_format({"bold": True})
-    italic_format = workbook.add_format({"italic": True})
+    # Проверки по горизонтали
+    for i, month in enumerate(month_order):
+        worksheet.write(len(classification) + 3, i + 2, f"Check ({month})")
 
-    # Применение форматирования
-    for row_num, row_data in classification.iterrows():
-        if row_data["Статья доходов"].startswith("Реализация работ и услуг"):
-            worksheet.write(row_num + 1, 0, row_data["Статья доходов"], bold_format)
-        elif pd.notna(row_data["Итоговая сумма"]):  # Если это контрагент внутри "Реализация работ и услуг"
-            worksheet.write(row_num + 1, 0, row_data["Статья доходов"], italic_format)
+
+#ЗДЕСЬ НОВЫЙ КОД
+
+
+
+
+
+
 
 print(f"Файл сохранен как {output_file}")
