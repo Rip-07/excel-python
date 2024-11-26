@@ -153,20 +153,39 @@ with pd.ExcelWriter(output_file, engine="xlsxwriter") as writer:
     merge_format = workbook.add_format({"align": "center", "bold": True, "border": 1})
 
     # Добавление проверок по месяцам для "Классификация доходов"
-    worksheet = writer.sheets["Классификация доходов"]
-    worksheet.merge_range(0, 2, 0, len(classification_columns) - 1, "2024", merge_format)
+    worksheet_prihod = writer.sheets["Классификация доходов"]
+    worksheet_prihod.merge_range(0, 2, 0, len(classification_columns) - 1, "2024", merge_format)
 
-    # Проверки по горизонтали
+    prihod_last_row = len(classification) + 1
+
+    # Проверки по горизонтали для доходов
     for i, month in enumerate(month_order):
-        worksheet.write(len(classification) + 3, i + 2, f"Check ({month})")
+        month_sum = classification[month].sum() if month in classification.columns else 0
+        prihod_month_sum = prihod[prihod["Месяц"] == month]["Сумма дебита"].sum() if month in prihod[
+            "Месяц"].values else 0
+        difference_sum = month_sum - prihod_month_sum
 
+        worksheet_prihod.write(prihod_last_row + 2, i + 2, f"Check ({month})")
+        worksheet_prihod.write(prihod_last_row + 3, i + 2, month_sum, number_format)
+        worksheet_prihod.write(prihod_last_row + 4, i + 2, prihod_month_sum, number_format)
+        worksheet_prihod.write(prihod_last_row + 5, i + 2, difference_sum, number_format)
 
-#ЗДЕСЬ НОВЫЙ КОД
+    # Добавление проверок по месяцам для "Классификация расходов"
+    worksheet_rashod = writer.sheets["Классификация расходов"]
+    worksheet_rashod.merge_range(0, 2, 0, len(classification_rashod_columns) - 1, "2024", merge_format)
 
+    rashod_last_row = len(classification_rashod) + 1
 
+    # Проверки по горизонтали для расходов
+    for i, month in enumerate(month_order):
+        month_sum_rashod = classification_rashod[month].sum() if month in classification_rashod.columns else 0
+        rashod_month_sum = rashod[rashod["Месяц"] == month]["Сумма кредита"].sum() if month in rashod[
+            "Месяц"].values else 0
+        difference_sum_rashod = month_sum_rashod - rashod_month_sum
 
-
-
-
+        worksheet_rashod.write(rashod_last_row + 2, i + 2, f"Check ({month})")
+        worksheet_rashod.write(rashod_last_row + 3, i + 2, month_sum_rashod, number_format)
+        worksheet_rashod.write(rashod_last_row + 4, i + 2, rashod_month_sum, number_format)
+        worksheet_rashod.write(rashod_last_row + 5, i + 2, difference_sum_rashod, number_format)
 
 print(f"Файл сохранен как {output_file}")
